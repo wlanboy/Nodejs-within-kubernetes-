@@ -18,14 +18,25 @@ helm install nodejs-hello-world chart/ --namespace nodejs-hello-world
 helm status nodejs-hello-world --namespace nodejs-hello-world
 
 helm upgrade nodejs-hello-world chart/ --namespace nodejs-hello-world
+
+# Neues Image nachladen: bei unveraendertem ":latest"-Tag unterscheidet sich
+# das von Helm gerenderte Manifest nach einem reinen "docker push" nicht vom
+# vorherigen Stand - "helm upgrade" sieht also keine Aenderung und loest
+# keinen Rollout aus, obwohl ein neues Image in der Registry liegt. Ein
+# expliziter Rollout-Restart erzwingt neue Pods, die dank
+# "imagePullPolicy: Always" das frische Image ziehen.
+kubectl rollout restart deployment/nodejs-hello-world --namespace nodejs-hello-world
+kubectl rollout status deployment/nodejs-hello-world --namespace nodejs-hello-world
 ```
 
 **Hinweis zum Image-Tag:** [values.yaml](chart/values.yaml) nutzt bewusst
 `:latest` mit `imagePullPolicy: Always` fuer dieses Beispiel-Repo (schnelles
 lokales Bauen/Testen ohne Versions-Bumps). Fuer den produktiven Einsatz
 sollte stattdessen ein gepinnter Tag (z. B. `1.0.0`) oder ein Image-Digest
-verwendet werden, damit Rollouts reproduzierbar bleiben und Nodes nicht
-dauerhaft an ein veraltetes gecachtes `latest`-Image gebunden sind.
+verwendet werden, damit Rollouts reproduzierbar bleiben, Nodes nicht
+dauerhaft an ein veraltetes gecachtes `latest`-Image gebunden sind und ein
+"helm upgrade" mit geaendertem Tag den Rollout wieder automatisch ausloest
+(der `rollout restart` oben waere dann nicht mehr noetig).
 
 ---
 
