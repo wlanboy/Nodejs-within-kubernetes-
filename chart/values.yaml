@@ -1,0 +1,138 @@
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount: 2
+
+image:
+  repository: wlanboy/nodejs-hello-world
+  tag: latest
+  pullPolicy: Always
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8081"
+  prometheus.io/path: "/metrics"
+
+# Node faehrt Verbindungen i.d.R. binnen weniger Sekunden runter (kein
+# Thread-Pool/Connection-Pool-Drain wie bei Tomcat) - 15s Puffer reichen.
+terminationGracePeriodSeconds: 15
+automountServiceAccountToken: false
+
+podAntiAffinity:
+  enabled: true
+  weight: 100
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop: ["ALL"]
+
+service:
+  type: ClusterIP
+  port: 80
+
+# Istio Gateway/VirtualService fuer eingehenden Traffic ueber den
+# istio-ingressgateway-Service (Namespace istio-ingress). ".localhost" als
+# TLD wird von den meisten Resolvern (RFC 6761) automatisch auf 127.0.0.1
+# aufgeloest, ohne /etc/hosts-Eintrag - praktisch fuer lokales Testen.
+istio:
+  gateway:
+    enabled: true
+    selector:
+      istio: ingressgateway
+  host: nodejs-hello-world.localhost
+
+ports:
+  http: 8080
+  management: 8081
+
+env:
+  TZ: "Europe/Berlin"
+  NODE_ENV: "production"
+  # libuv-Thread-Pool (fuer DNS/FS/Crypto etc.); Default ist 4 und fuer dieses
+  # I/O-arme Hello-World-Workload ausreichend, explizit gesetzt um die Kopplung
+  # an resources.limits.cpu sichtbar zu machen (mehr Threads als CPU-Zeit
+  # verfuegbar ist bringt keinen Durchsatzgewinn, nur Kontextwechsel-Overhead)
+  UV_THREADPOOLSIZE: "4"
+  LOG_LEVEL: "info"
+  # Muss > Envoy/Istio-Sidecar-Idle-Timeout sein, sonst killt Node Keep-Alive-
+  # Verbindungen serverseitig bevor der Sidecar es tut (sporadische RSTs).
+  KEEP_ALIVE_TIMEOUT_MS: "65000"
+  HEADERS_TIMEOUT_MS: "66000"
+  # Ohne otel-collector im Cluster einfach auf "true" setzen (Standard-OTel-
+  # Env-Var), statt fehlschlagende Export-Versuche in den Logs zu haben.
+  OTEL_SDK_DISABLED: "true"
+  OTEL_SERVICE_NAME: "nodejs-hello-world"
+  # nur relevant wenn OTEL_SDK_DISABLED=false; Adresse eines otel-collector-
+  # Service/Sidecars, das OTLP/HTTP auf Port 4318 entgegennimmt
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.observability.svc.cluster.local:4318"
+
+# NODE_OPTIONS: Node/V8 leitet die Heap-Groesse NICHT automatisch aus dem
+# cgroup-Memory-Limit ab (anders als container-aware JVMs via
+# -XX:MaxRAMPercentage) - ohne --max-old-space-size waechst der Heap im
+# Zweifel ueber resources.limits.memory hinaus und der Container wird vom
+# Kubelet per OOM-Kill beendet, statt dass V8 selbst kontrolliert GC betreibt.
+# Wert hier bewusst deutlich unter dem Memory-Limit (256Mi), da RSS zusaetzlich
+# Code/Stacks/Buffer/native Allocations ausserhalb des V8-Heaps enthaelt.
+nodeOptions: >-
+  --max-old-space-size=160
+  --max-http-header-size=16384
+
+resources:
+  requests:
+    cpu: "50m"
+    memory: "96Mi"
+    ephemeral-storage: "64Mi"
+  limits:
+    cpu: "250m"
+    memory: "256Mi"
+    ephemeral-storage: "128Mi"
+
+# Node startet i.d.R. in < 1s (kein Classloading/AOT-Warmup wie bei der JVM),
+# daher kurze Intervalle statt langer Wartezeit bis Traffic ankommt.
+startupProbe:
+  path: /health/readiness
+  port: management
+  failureThreshold: 15
+  periodSeconds: 1
+  timeoutSeconds: 2
+
+readinessProbe:
+  path: /health/readiness
+  port: management
+  initialDelaySeconds: 0
+  periodSeconds: 5
+  timeoutSeconds: 2
+  failureThreshold: 3
+
+livenessProbe:
+  path: /health/liveness
+  port: management
+  initialDelaySeconds: 0
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 3
+
+preStopSleepSeconds: 3
+
+# PodDisruptionBudget: begrenzt, wie viele Pods bei freiwilligen Disruptions
+# (Node-Drain, Cluster-Autoscaler-Downscale, kubectl evict) gleichzeitig
+# entfernt werden duerfen. Schuetzt NICHT vor Pod-Crashes/OOM-Kills, nur vor
+# absichtlichen/geplanten Aktionen.
+# Achtung: minAvailable muss kleiner als replicaCount sein - bei
+# minAvailable == replicaCount (z.B. beide = 1) wird jede freiwillige
+# Disruption blockiert, weil das Entfernen des letzten verfuegbaren Pods das
+# Budget verletzen wuerde. Bei replicaCount: 1 daher enabled: false lassen
+# oder replicaCount erhoehen.
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

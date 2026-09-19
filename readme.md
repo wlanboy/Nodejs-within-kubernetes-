@@ -117,3 +117,17 @@ Java-Referenzprojekt gehalten, mit folgenden Node-spezifischen Anpassungen:
 | `templates/deployment.yaml` | Deployment mit RollingUpdate (`maxUnavailable: 0`), Pod-AntiAffinity ueber Nodes, non-root `securityContext` (Pod + Container), Startup-/Readiness-/Liveness-Probes gegen den Management-Port, `preStop`-Sleep, Resource-Requests/-Limits. |
 | `templates/service.yaml` | `ClusterIP`-Service, exposed nur den Application-Port (8080) - der Management-Port bleibt absichtlich unexposed. |
 | `templates/poddisruptionbudget.yaml` | Begrenzt gleichzeitige freiwillige Disruptions (Node-Drain, Cluster-Autoscaler-Downscale); schuetzt **nicht** vor Crashes/OOM-Kills. |
+| `templates/gateway.yaml` | Istio `Gateway` (nur bei `istio.gateway.enabled: true`), bindet den bestehenden `istio-ingressgateway`-Service ueber `spec.selector` an den in `istio.host` konfigurierten Hostnamen. |
+| `templates/virtualservice.yaml` | Istio `VirtualService`, routet Traffic fuer `istio.host` vom Gateway auf den `Service` (Application-Port). |
+
+### Zugriff ueber den Istio Ingress Gateway
+
+`istio.host` ist standardmaessig `nodejs-hello-world.localhost` gesetzt -
+diese TLD wird von den meisten Resolvern (RFC 6761) automatisch auf
+`127.0.0.1` aufgeloest, ganz ohne `/etc/hosts`-Eintrag:
+
+```bash
+kubectl port-forward -n istio-ingress svc/istio-ingressgateway 8081:80
+
+curl http://nodejs-hello-world.localhost:8081/hello
+```
