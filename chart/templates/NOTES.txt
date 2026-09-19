@@ -1,0 +1,7 @@
+{{ include "nodejs-hello-world.fullname" . }} wurde in Namespace {{ .Release.Namespace }} deployed.
+
+Rollout-Status pruefen:
+  kubectl rollout status -n {{ .Release.Namespace }} deployment/{{ include "nodejs-hello-world.fullname" . }}
+
+Service erreichen (Port-Forward):
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "nodejs-hello-world.fullname" . }} 8080:{{ .Values.service.port }}

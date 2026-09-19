@@ -1,0 +1,6 @@
+apiVersion: v2
+name: nodejs-hello-world
+description: Helm chart fuer den nodejs-hello-world Service
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
