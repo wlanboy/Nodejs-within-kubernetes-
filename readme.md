@@ -29,17 +29,46 @@ dauerhaft an ein veraltetes gecachtes `latest`-Image gebunden sind.
 
 ---
 
-## Docker-Image (`service/Dockerfile`)
+## Docker-Image
+
+Es gibt zwei alternative Dockerfiles fuer dieselbe Runtime-Konfiguration
+(gleiche `USER`/`WORKDIR`-Zielgroessen, gleicher Start-Befehl) - der
+Unterschied liegt nur in der Basis-Image-Wahl:
+
+| Datei | Basis-Image (Runtime-Stage) | Wann verwenden |
+|---|---|---|
+| [`service/Dockerfile`](service/Dockerfile) (Default, wird von `docker build service/` sowie der CI in [dockerpublish.yml](.github/workflows/dockerpublish.yml) genutzt) | Red Hat UBI10 (`registry.access.redhat.com/ubi10/nodejs-24-minimal`) | OpenShift-Betrieb, bestehender RHEL-Support-Vertrag, oder wenn RHEL-gepflegtes CVE-Patching/Compliance-Nachweis wichtiger ist als minimale Image-Groesse. Bringt weiterhin `bash`/Coreutils mit. |
+| [`service/Dockerfile-Distroless`](service/Dockerfile-Distroless) (`docker build -f service/Dockerfile-Distroless -t ... service/`) | [Google Distroless](https://github.com/GoogleContainerTools/distroless) (`gcr.io/distroless/nodejs24-debian13:nonroot`) | Wenn minimale Angriffsflaeche/Image-Groesse Prioritaet hat und kein RHEL-Support-Bezug besteht. Kein Shell im Image - kein `kubectl exec ... sh`. |
+
+Beide sind zweistufig gebaut: eine Builder-Stage fuer `npm ci`, und eine
+schlanke Runtime-Stage, die nur `node_modules`/`package.json`/`src` kopiert.
+
+### `service/Dockerfile` (UBI10, Default)
 
 | Entscheidung | Begruendung |
 |---|---|
 | Zweistufiger Build (`deps` + Runtime) | `npm ci --omit=dev` laeuft in einer eigenen Stage, damit Layer-Caching greift, solange sich `package.json`/`package-lock.json` nicht aendern - Quellcode-Aenderungen erzwingen keinen erneuten `npm ci`. |
-| `--mount=type=cache,target=/root/.npm` | Nutzt den BuildKit-Cache-Mount fuer den npm-Cache ueber mehrere Builds hinweg, ohne ihn im Image-Layer zu materialisieren. |
-| `node:24-slim` statt `node:24-alpine` | Bewusst **kein** Alpine: Alpine nutzt musl statt glibc, was bei nativen npm-Addons zu Kompatibilitaetsproblemen fuehren kann und in Kubernetes fuer die bekannten musl-DNS-Resolver-Eigenheiten (u. a. kein paralleles A/AAAA-Lookup) sorgt. `slim` ist Debian-basiert (glibc, maximal kompatibel) und trotzdem deutlich schlanker als das volle `node:24`-Image (kein Build-Toolchain/Doku-Overhead). |
-| Kein `addgroup`/`adduser` | `node:*-slim` bringt bereits einen `node`-User mit fester UID/GID **1000** mit - passt exakt zu `runAsUser`/`fsGroup` in [chart/values.yaml](chart/values.yaml), ohne dass ein eigener User angelegt werden muss. |
-| `USER 1000:1000` (numerisch) | Numerisch statt `USER node`, damit `runAsNonRoot`/`runAsUser` im Pod-SecurityContext die UID zuverlaessig auswerten koennen, unabhaengig vom `/etc/passwd`-Eintrag im Image. |
-| Kein Shell-Entrypoint/`entrypoint.sh` | Node liest die Umgebungsvariable `NODE_OPTIONS` automatisch beim Start (siehe unten) - ein Wrapper-Skript wie im JVM/`JarLauncher`-Setup (dort noetig, um `JAVA_OPTS` vor den Klassenpfad zu haengen) ist ueberfluessig. `ENTRYPOINT ["node", "src/server.js"]` macht den Node-Prozess direkt zu PID 1 und er erhaelt `SIGTERM` unmittelbar, ohne den `exec`-Trick eines Shell-Skripts. |
+| `registry.access.redhat.com/ubi10/nodejs-24` als Builder-Stage (`deps`) | Volles Builder-Image (inkl. `npm`, Build-Toolchain), RHEL-10-basiert (glibc). `--mount=type=cache,target=/opt/app-root/src/.npm,uid=1001,gid=0` nutzt den BuildKit-Cache-Mount fuer den npm-Cache passend zum Default-User (UID 1001) dieses Basis-Images. |
+| `registry.access.redhat.com/ubi10/nodejs-24-minimal` als Runtime-Stage | Gleiche RHEL-10-Basis wie der Builder, aber ohne die s2i-/Build-Tools, die zur Laufzeit nicht mehr gebraucht werden. Weiterhin mit `bash`/Coreutils - kein Attack-Surface-Minimum wie bei `Dockerfile-Distroless`, dafuer volle Debug-Faehigkeit per `kubectl exec ... bash` und Red-Hat-eigenes CVE-Tracking/Patching der Basis-Libraries. |
+| `WORKDIR /opt/app-root/src` statt `/app` | Der Default-User des Basis-Images (UID 1001, OpenShift-"arbitrary uid"-Konvention: GID 0) koennte ein neues Verzeichnis wie `/app` nicht anlegen, da `/` nicht gruppen-beschreibbar ist - `/opt/app-root/src` ist im Image bereits fuer GID 0 beschreibbar vorbereitet. |
+| `COPY --chown=1000:1000 ...` | Image-Default ist UID 1001/GID 0. Explizit auf UID/GID 1000 umgesetzt, damit der Dateibesitz mit `runAsUser`/`fsGroup` im Pod-SecurityContext ([chart/values.yaml](chart/values.yaml)) uebereinstimmt. |
+| `USER 1000:1000` (numerisch) | Ueberschreibt den image-eigenen Default-User (UID 1001) explizit auf UID/GID 1000 aus demselben Grund. |
+| Eigenes `ENTRYPOINT` statt des s2i-`container-entrypoint`-Wrappers | Der im Basis-Image gesetzte Wrapper ist nur ein `exec`-Passthrough (harmlos fuer PID-1/Signal-Handling), aber fuer diesen Nicht-s2i-Build ueberfluessig - `ENTRYPOINT ["node", "--import", "./src/tracing.js", "src/server.js"]` macht die Absicht explizit. `--import` laedt `tracing.js` **vor** `server.js`, damit die OTel-HTTP-Instrumentation das `http`-Modul patchen kann, bevor `server.js` es importiert. |
 | `EXPOSE 8080 8081` | Getrennter Application- (8080) und Management-Port (8081), siehe unten. |
+
+### `service/Dockerfile-Distroless` (Alternative)
+
+| Entscheidung | Begruendung |
+|---|---|
+| `node:24-slim` als Builder-Stage (`deps`) statt `node:24-alpine` | Bewusst **kein** Alpine fuer den `npm ci`-Schritt: Alpine nutzt musl statt glibc, was bei nativen npm-Addons zu Kompatibilitaetsproblemen fuehren kann. `slim` ist Debian-basiert (glibc, maximal kompatibel) und trotzdem deutlich schlanker als das volle `node:24`-Image (kein Build-Toolchain/Doku-Overhead). |
+| `gcr.io/distroless/nodejs24-debian13:nonroot` als Runtime-Stage | Enthaelt nur die Node-Runtime und noetige System-Libraries - kein Shell, kein Paketmanager, keine Coreutils. Kleinstes Image der drei Varianten (getestet: ~214 MB Basis vs. ~332 MB `node:24-slim` vs. ~343 MB `ubi10/nodejs-24-minimal`). Preis: kein `kubectl exec ... sh` mehr moeglich - fuer Debugging lokal kurzzeitig auf den `:debug-nonroot`-Tag wechseln oder `kubectl debug` mit einem Ephemeral-Container nutzen. |
+| `COPY --chown=1000:1000 ...` statt `RUN chown -R node:node /app` | Distroless hat kein Shell, `chown` ist im finalen Image also gar nicht verfuegbar - der Dateibesitz wird stattdessen ueber das BuildKit-Feature `--chown` direkt beim `COPY` gesetzt (laeuft im Builder, nicht im Zielimage). |
+| `USER 1000:1000` (numerisch) | Ueberschreibt den image-eigenen `nonroot`-Default-User des Distroless-Images (UID/GID 65532) explizit auf UID/GID 1000, damit `runAsUser`/`fsGroup` im Pod-SecurityContext ([chart/values.yaml](chart/values.yaml)) mit dem Dateibesitz der `COPY --chown`-Befehle uebereinstimmen. Funktioniert rein numerisch auch ohne `/etc/passwd`-Eintrag im Image. |
+| Kein eigenes `ENTRYPOINT`, stattdessen `CMD` | Das Distroless-Image setzt `ENTRYPOINT` bereits auf die eingebettete Node-Binary - der Node-Prozess wird dadurch direkt PID 1 und erhaelt `SIGTERM` unmittelbar, ganz ohne Shell-Wrapper. `CMD ["--import", "./src/tracing.js", "src/server.js"]` liefert nur noch die Argumente. |
+
+Beide Varianten wurden lokal gebaut und gegen `readOnlyRootFilesystem`
+(`docker run --read-only --tmpfs /tmp`), `/health/readiness`, `USER 1000:1000`
+und sauberen `SIGTERM`-Shutdown (Exit-Code 0) getestet.
 
 ---
 

@@ -1,4 +1,8 @@
 # syntax=docker/dockerfile:1
+#
+# Alternative zu Dockerfile (UBI10): minimale Angriffsflaeche statt
+# RHEL-Support/CVE-Tracking. Build mit:
+#   docker build -f service/Dockerfile-Distroless -t nodejs-hello-world:distroless service/
 
 # --- Dependencies (nur Produktions-Deps, cache-freundlich getrennt vom Quellcode) ---
 FROM node:24-slim AS deps
@@ -12,7 +16,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev
 # die Angriffsflaeche/CVE-Zahl im laufenden Container weiter (dort existiert
 # bei -slim theoretisch noch bash/apt, auch wenn ungenutzt). Preis: kein
 # "kubectl exec ... sh" mehr moeglich.
-# Fuer Debugging "kubectl debug" mit einem Ephemeral-Container verwenden. 
+# Fuer Debugging "kubectl debug" mit einem Ephemeral-Container verwenden.
 # Debian-13-basiert wie der Builder auf glibc.
 FROM gcr.io/distroless/nodejs24-debian13:nonroot
 WORKDIR /app
