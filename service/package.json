@@ -1,0 +1,23 @@
+{
+  "name": "nodejs-hello-world",
+  "version": "0.0.1",
+  "description": "Minimal Node.js REST hello-world service, optimiert fuer den Betrieb in Kubernetes",
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.222.0",
+    "@opentelemetry/instrumentation-http": "^0.222.0",
+    "@opentelemetry/resources": "^2.11.0",
+    "@opentelemetry/sdk-node": "^0.222.0",
+    "@opentelemetry/semantic-conventions": "^1.43.0",
+    "pino": "^10.3.1",
+    "prom-client": "^15.1.3"
+  }
+}
