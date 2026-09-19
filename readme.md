@@ -9,8 +9,15 @@ genauso lokal).
 ## Deploy
 
 ```bash
+kubectl create namespace nodejs-hello-world
+kubectl label namespace nodejs-hello-world istio-injection=enabled
+
 docker build -t wlanboy/nodejs-hello-world:latest service/
-helm install nodejs-hello-world chart/
+helm install nodejs-hello-world chart/ --namespace nodejs-hello-world
+
+helm status nodejs-hello-world --namespace nodejs-hello-world
+
+helm upgrade nodejs-hello-world chart/ --namespace nodejs-hello-world
 ```
 
 **Hinweis zum Image-Tag:** [values.yaml](chart/values.yaml) nutzt bewusst
