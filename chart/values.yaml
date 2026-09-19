@@ -58,6 +58,12 @@ ports:
 env:
   TZ: "Europe/Berlin"
   NODE_ENV: "production"
+  # V8-Compile-Cache fuer schnelleren Start bei Container-Neustarts INNERHALB
+  # desselben Pods (z.B. nach uncaughtException/OOM) - das emptyDir-Volume
+  # unter /tmp (siehe volumeMounts) ueberlebt Container-Restarts, aber nicht
+  # das Scheduling eines komplett neuen Pods (frisches emptyDir, kein
+  # Startup-Gewinn beim allerersten Start). Erfordert Node >= 22.1.0.
+  NODE_COMPILE_CACHE: "/tmp/node-compile-cache"
   # libuv-Thread-Pool (fuer DNS/FS/Crypto etc.); Default ist 4 und fuer dieses
   # I/O-arme Hello-World-Workload ausreichend, explizit gesetzt um die Kopplung
   # an resources.limits.cpu sichtbar zu machen (mehr Threads als CPU-Zeit
