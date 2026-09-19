@@ -1,0 +1,37 @@
+# syntax=docker/dockerfile:1
+
+# --- Dependencies (nur Produktions-Deps, cache-freundlich getrennt vom Quellcode) ---
+FROM node:24-slim AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev
+
+# --- Runtime ---
+# Distroless statt node:24-slim: enthaelt nur die Node-Runtime und noetige
+# System-Libraries - kein Shell, kein Paketmanager, keine Coreutils. Reduziert
+# die Angriffsflaeche/CVE-Zahl im laufenden Container weiter (dort existiert
+# bei -slim theoretisch noch bash/apt, auch wenn ungenutzt). Preis: kein
+# "kubectl exec ... sh" mehr moeglich.
+# Fuer Debugging "kubectl debug" mit einem Ephemeral-Container verwenden. 
+# Debian-13-basiert wie der Builder auf glibc.
+FROM gcr.io/distroless/nodejs24-debian13:nonroot
+WORKDIR /app
+COPY --from=deps --chown=1000:1000 /app/node_modules ./node_modules
+COPY --chown=1000:1000 package.json ./
+COPY --chown=1000:1000 src ./src
+
+# Kein chown-Befehl verfuegbar (kein Shell im Image) - Dateibesitz kommt
+# bereits aus den --chown-Flags der COPY-Befehle oben. USER ueberschreibt
+# hier numerisch den image-eigenen "nonroot"-Default-User (UID/GID 65532)
+# auf UID/GID 1000, damit runAsUser/fsGroup in chart/values.yaml mit dem
+# Dateibesitz uebereinstimmen; funktioniert ohne /etc/passwd-Eintrag.
+USER 1000:1000
+EXPOSE 8080 8081
+ENV NODE_ENV=production
+
+# Kein eigenes ENTRYPOINT noetig: das Distroless-Image setzt es bereits auf
+# die eingebettete Node-Binary (PID 1, kein Shell-Wrapper, erhaelt SIGTERM
+# unmittelbar) - hier nur noch CMD mit den Argumenten. --import laedt
+# tracing.js VOR server.js, damit die OTel-HTTP-Instrumentation das
+# http-Modul patchen kann, bevor server.js es importiert.
+CMD ["--import", "./src/tracing.js", "src/server.js"]
