@@ -1,0 +1,13 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "nodejs-hello-world.fullname" . }}
+  labels:
+    {{- include "nodejs-hello-world.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "nodejs-hello-world.selectorLabels" . | nindent 6 }}
+{{- end }}
