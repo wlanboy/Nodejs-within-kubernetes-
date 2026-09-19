@@ -1,4 +1,4 @@
-import { Counter } from 'prom-client';
+import { Counter } from '@prometheus-io/client';
 
 const helloRequestsTotal = new Counter({
   name: 'nodejs_hello_world_hello_requests_total',

@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import { collectDefaultMetrics, register } from 'prom-client';
+import { collectDefaultMetrics, register } from '@prometheus-io/client';
 import { trace } from '@opentelemetry/api';
 import { sdk as otelSdk } from './tracing.js';
 import { logger } from './logger.js';
