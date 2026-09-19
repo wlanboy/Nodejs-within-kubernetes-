@@ -13,10 +13,9 @@ FROM node:24-slim
 # "node"-User mit fester UID/GID 1000 mit - passt exakt zu runAsUser/fsGroup in
 # chart/values.yaml, daher kein addgroup/adduser noetig
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY package.json ./
-COPY src ./src
-RUN chown -R node:node /app
+COPY --from=deps --chown=1000:1000 /app/node_modules ./node_modules
+COPY --chown=1000:1000 package.json ./
+COPY --chown=1000:1000 src ./src
 
 # numerisch statt namentlich, damit runAsNonRoot/runAsUser in
 # chart/templates/deployment.yaml die UID zuverlaessig auswerten koennen
