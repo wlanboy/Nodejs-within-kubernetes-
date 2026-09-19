@@ -127,7 +127,5 @@ diese TLD wird von den meisten Resolvern (RFC 6761) automatisch auf
 `127.0.0.1` aufgeloest, ganz ohne `/etc/hosts`-Eintrag:
 
 ```bash
-kubectl port-forward -n istio-ingress svc/istio-ingressgateway 8081:80
-
-curl http://nodejs-hello-world.localhost:8081/hello
+curl http://nodejs-hello-world.localhost:80/hello
 ```
